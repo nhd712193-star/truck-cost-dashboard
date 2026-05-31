@@ -11,6 +11,28 @@ Static dashboard cho chi phí thuê xe B2B Truck Last-mile.
 | Data host | Cloudflare R2 |
 | Data base | `https://pub-a8611e8e054b4700b1baf208dfd70d3a.r2.dev/prod` |
 
+## Access Gate
+
+- Dashboard yêu cầu Google Sign-In bằng email `@ghn.vn` trước khi tải dữ liệu.
+- Frontend dùng Google Identity Services, serverless function `/api/auth` xác thực ID token với Google.
+- Nếu cấu hình Firebase service account, `/api/auth` sẽ đọc/ghi Firestore để quản lý user, role và audit login.
+- Vercel env:
+  - `GOOGLE_CLIENT_ID`
+  - `ALLOWED_DOMAIN`
+  - `SESSION_SECRET`
+  - `FIREBASE_SERVICE_ACCOUNT_JSON`
+  - `BOOTSTRAP_ADMIN_EMAILS`, ví dụ `admin@ghn.vn,owner@ghn.vn`
+  - `AUTO_PROVISION_USERS=false` nếu muốn chặn user chưa có trong Firestore.
+- Trong Google Cloud OAuth, Authorized JavaScript origins phải có production URL của dashboard.
+- Local test không cần OAuth: mở `http://localhost:5173/?devAuth=1`.
+
+Firestore collections:
+
+```text
+dashboard_users/{base64url(email)}
+dashboard_audit_logs/{autoId}
+```
+
 ## Scope
 
 - Đơn có `weight >= 15000` gram.
@@ -101,4 +123,3 @@ bash scripts/verify_deployment.sh
 - [Project Overview](docs/PROJECT_OVERVIEW.md)
 - [Deployment Guide](docs/DEPLOYMENT.md)
 - [Operations Runbook](docs/OPERATIONS.md)
-

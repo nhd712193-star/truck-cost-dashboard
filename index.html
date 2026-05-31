@@ -4,10 +4,39 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Chi phí thuê xe B2B >=15kg</title>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body>
-    <main class="app-shell">
+  <body class="auth-pending">
+    <section id="loginGate" class="login-gate" aria-label="Xác nhận truy cập">
+      <canvas id="loginBgCanvas" class="login-bg-canvas" aria-hidden="true"></canvas>
+      <div class="login-card">
+        <div class="login-brand">
+          <div class="login-logo">NẶNG</div>
+          <div>
+            <div class="login-kicker">GHN B2B CI</div>
+            <h1>Truck Cost Intelligence</h1>
+          </div>
+        </div>
+
+        <p class="login-copy">Hệ thống nội bộ phân tích chi phí thuê xe B2B</p>
+        <p class="login-domain">CHỈ DÀNH CHO TÀI KHOẢN @GHN.VN</p>
+
+        <div id="googleSigninButton" class="google-signin-button"></div>
+        <div id="loginLoading" class="login-loading" hidden>
+          <span aria-hidden="true"></span>
+          Đang xác thực...
+        </div>
+        <div id="loginError" class="login-error" role="alert" hidden></div>
+
+        <footer class="login-footnote">
+          B2B Continuous Improvement<br />
+          Liên hệ vinhnt nếu không thể đăng nhập
+        </footer>
+      </div>
+    </section>
+
+    <main id="dashboardApp" class="app-shell" hidden>
       <header class="topbar">
         <div class="brand-block">
           <div class="scope-nav">
@@ -15,7 +44,9 @@
             <nav class="tabbar" role="tablist" aria-label="Điều hướng dashboard">
               <button id="dashboardTab" class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="dashboardPanel" data-tab-target="dashboardPanel">Dashboard</button>
               <button id="methodTab" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="methodPanel" data-tab-target="methodPanel">READ ME</button>
+              <button id="adminTab" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="adminPanel" data-tab-target="adminPanel" hidden>Admin</button>
             </nav>
+            <button id="signOutButton" class="sign-out-button" type="button" hidden>Đăng xuất</button>
           </div>
           <div class="brand-main">
             <h1>Chi phí thuê xe B2B</h1>
@@ -211,6 +242,44 @@
             <span class="step-kicker">06 · Chỗ dễ đọc sai</span>
             <h3>Lưu ý khi tháng chưa đủ cost</h3>
             <p>Có tháng đã phát sinh đơn và kg, nhưng file Excel cost chưa được cập nhật. Khi đó dashboard chưa có đủ data để hiển thị.</p>
+          </article>
+        </section>
+      </section>
+
+      <section id="adminPanel" class="tab-panel admin-panel" role="tabpanel" aria-labelledby="adminTab" hidden>
+        <section class="admin-head">
+          <div>
+            <h2>Quản trị truy cập</h2>
+            <span id="adminSessionSummary"></span>
+          </div>
+          <button id="adminRefreshButton" class="banner-link" type="button">Tải lại</button>
+        </section>
+
+        <section id="adminError" class="quality-banner" hidden></section>
+
+        <section class="admin-grid">
+          <article class="panel">
+            <div class="panel-head">
+              <h2>Danh sách user</h2>
+              <span id="adminUsersSummary"></span>
+            </div>
+            <form id="adminAddUserForm" class="admin-add-user">
+              <input id="adminNewUserEmail" type="email" placeholder="email@ghn.vn" autocomplete="off" required>
+              <select id="adminNewUserRole" class="admin-select">
+                <option value="viewer">Viewer</option>
+                <option value="admin">Admin</option>
+              </select>
+              <button class="banner-link" type="submit">Thêm user</button>
+            </form>
+            <div id="adminUsersTable" class="admin-table-wrap"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <h2>Audit login</h2>
+              <span id="adminAuditSummary"></span>
+            </div>
+            <div id="adminAuditTable" class="admin-table-wrap"></div>
           </article>
         </section>
       </section>

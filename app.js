@@ -4,6 +4,12 @@ const isLocalHost = ["localhost", "127.0.0.1", ""].includes(location.hostname);
 const DATA_BASE = new URLSearchParams(location.search).get("dataBase")
   || (isLocalHost ? LOCAL_DATA_BASE : REMOTE_DATA_BASE);
 const ORDER_INDEX_DELAY_MS = 1500;
+const AUTH_CONFIG = {
+  googleClientId: "539088901792-2e10ph65slrgmqcsdl2906blne9c69cc.apps.googleusercontent.com",
+  allowedDomain: "ghn.vn",
+  apiEndpoint: "/api/auth",
+  sessionKey: "truck_cost_dashboard_session",
+};
 
 const state = {
   data: {},
@@ -24,12 +30,17 @@ const state = {
   orderIndexRowsByMonth: new Map(),
   orderIndexLoadsByMonth: new Map(),
   orderIndexFallbackRollup: "",
+  dashboardStarted: false,
+  authSession: null,
+  adminLoaded: false,
 };
 
 const el = (id) => document.getElementById(id);
 const orderStatsMemo = new WeakMap();
 const pendingDetailsMemo = new WeakMap();
 const partitionMemo = new WeakMap();
+let googleAuthInitialized = false;
+let loginBgStarted = false;
 
 const formatVnd = new Intl.NumberFormat("vi-VN", {
   maximumFractionDigits: 0,
@@ -76,6 +87,289 @@ const HELP_TEXT = {
   "Quận/huyện thấp nhất": "Quận/huyện có chi phí/kg thấp nhất trong tỉnh đang chọn. Nên áp dụng ngưỡng volume tối thiểu.",
   "Phường/xã cao nhất": "Top phường/xã theo chi phí/kg trong quận/huyện đang chọn.",
 };
+
+function isAllowedEmail(email) {
+  return String(email || "").toLowerCase().endsWith(`@${AUTH_CONFIG.allowedDomain}`);
+}
+
+function decodeJwt(token) {
+  try {
+    const base64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(atob(base64));
+  } catch (error) {
+    return null;
+  }
+}
+
+function readAuthSession() {
+  try {
+    const raw = sessionStorage.getItem(AUTH_CONFIG.sessionKey);
+    return raw ? JSON.parse(raw) : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function writeAuthSession(session) {
+  try {
+    sessionStorage.setItem(AUTH_CONFIG.sessionKey, JSON.stringify(session));
+  } catch (error) {
+    console.warn("Cannot save auth session", error);
+  }
+}
+
+function clearAuthSession() {
+  try {
+    sessionStorage.removeItem(AUTH_CONFIG.sessionKey);
+  } catch (error) {
+    console.warn("Cannot clear auth session", error);
+  }
+}
+
+function isAuthSessionValid(session) {
+  if (!session?.email || !isAllowedEmail(session.email)) return false;
+  if (!session.exp) return false;
+  if (Date.now() / 1000 >= Number(session.exp)) return false;
+  return Boolean(session.permissions && Object.keys(session.permissions).length);
+}
+
+function isAdminSession(session) {
+  return Boolean(session?.permissions?.admin);
+}
+
+function setLoginLoading(isLoading) {
+  el("loginLoading").hidden = !isLoading;
+}
+
+function showLoginError(message) {
+  const node = el("loginError");
+  node.hidden = false;
+  node.textContent = message;
+  setLoginLoading(false);
+}
+
+function hideLoginError() {
+  const node = el("loginError");
+  node.hidden = true;
+  node.textContent = "";
+}
+
+function showLoginGate() {
+  document.body.classList.remove("auth-pending", "auth-ready");
+  document.body.classList.add("auth-required");
+  el("dashboardApp").hidden = true;
+  el("loginGate").hidden = false;
+  startLoginBackground();
+}
+
+function showDashboardShell(session) {
+  state.authSession = session;
+  document.body.classList.remove("auth-pending", "auth-required");
+  document.body.classList.add("auth-ready");
+  el("loginGate").hidden = true;
+  el("dashboardApp").hidden = false;
+  const signOut = el("signOutButton");
+  signOut.hidden = false;
+  signOut.title = session?.email ? `Đang đăng nhập: ${session.email}` : "Đăng xuất";
+  el("adminTab").hidden = !isAdminSession(session);
+  el("adminSessionSummary").textContent = session?.email
+    ? `${session.email} | ${session.role || "viewer"}`
+    : "";
+}
+
+function saveAuthPayload(payload, userInfo = {}) {
+  const session = {
+    email: payload.email || "",
+    name: userInfo.name || payload.name || payload.email || "",
+    picture: payload.picture || "",
+    sub: payload.sub || "",
+    exp: payload.exp || 0,
+    savedAt: Date.now(),
+    role: userInfo.role || "user",
+    user_group: userInfo.user_group || "truck-cost-dashboard",
+    permissions: userInfo.permissions || { dashboard: true },
+  };
+  writeAuthSession(session);
+  return session;
+}
+
+function startDashboardAfterAuth(session) {
+  showDashboardShell(session);
+  if (state.dashboardStarted) return;
+  state.dashboardStarted = true;
+  loadData().catch((error) => {
+    console.error(error);
+    const banner = el("qualityBanner");
+    banner.hidden = false;
+    banner.innerHTML = `
+      <strong>Lỗi dữ liệu</strong>
+      <div><span>Không tải được dữ liệu: ${escapeHtml(error.message)}</span></div>
+    `;
+  });
+}
+
+function startDevAuthIfRequested() {
+  const params = new URLSearchParams(location.search);
+  if (!isLocalHost || params.get("devAuth") !== "1") return false;
+  const session = {
+    email: `local.dev@${AUTH_CONFIG.allowedDomain}`,
+    name: "Local Dev",
+    picture: "",
+    sub: "local-dev",
+    exp: Math.floor(Date.now() / 1000) + 12 * 60 * 60,
+    savedAt: Date.now(),
+    role: "developer",
+    user_group: "local",
+    permissions: { dashboard: true },
+  };
+  writeAuthSession(session);
+  startDashboardAfterAuth(session);
+  return true;
+}
+
+async function verifyAuthWithServer(credential) {
+  if (isLocalHost || !AUTH_CONFIG.apiEndpoint) return {};
+
+  const apiResponse = await fetch(AUTH_CONFIG.apiEndpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ credential }),
+  });
+  let data = {};
+  try {
+    data = await apiResponse.json();
+  } catch (error) {
+    data = {};
+  }
+
+  if (!apiResponse.ok) {
+    throw new Error(data.message || data.error || "Lỗi xác thực từ server.");
+  }
+  return data.user || {};
+}
+
+async function handleCredentialResponse(response) {
+  setLoginLoading(true);
+  hideLoginError();
+
+  const credential = response?.credential || "";
+  const payload = decodeJwt(credential);
+  if (!payload) {
+    showLoginError("Không thể đọc token Google. Vui lòng thử lại.");
+    return;
+  }
+
+  const email = payload.email || "";
+  if (!isAllowedEmail(email)) {
+    showLoginError(`Email ${email || "này"} không hợp lệ. Chỉ tài khoản @${AUTH_CONFIG.allowedDomain} mới được truy cập.`);
+    window.google?.accounts?.id?.disableAutoSelect();
+    return;
+  }
+
+  try {
+    const userInfo = await verifyAuthWithServer(credential);
+    const session = saveAuthPayload(payload, userInfo);
+    setLoginLoading(false);
+    startDashboardAfterAuth(session);
+  } catch (error) {
+    showLoginError(error.message || "Lỗi xác thực từ server. Vui lòng thử lại.");
+    window.google?.accounts?.id?.disableAutoSelect();
+  }
+}
+
+function initGoogleAuth() {
+  if (googleAuthInitialized) return true;
+  if (!window.google?.accounts?.id) return false;
+
+  googleAuthInitialized = true;
+  window.google.accounts.id.initialize({
+    client_id: AUTH_CONFIG.googleClientId,
+    callback: handleCredentialResponse,
+    hosted_domain: AUTH_CONFIG.allowedDomain,
+    auto_select: false,
+    ux_mode: "popup",
+  });
+  window.google.accounts.id.renderButton(
+    el("googleSigninButton"),
+    {
+      theme: "filled_black",
+      size: "large",
+      width: 300,
+      text: "signin_with",
+      shape: "rectangular",
+      logo_alignment: "left",
+    },
+  );
+  window.google.accounts.id.prompt();
+  return true;
+}
+
+function waitForGoogleAuth() {
+  if (initGoogleAuth()) return;
+  const script = document.querySelector('script[src*="accounts.google.com/gsi/client"]');
+  script?.addEventListener("load", initGoogleAuth, { once: true });
+  window.setTimeout(() => {
+    if (!googleAuthInitialized && !isAuthSessionValid(readAuthSession())) {
+      showLoginError("Không tải được Google Sign-In. Vui lòng kiểm tra kết nối hoặc thử tải lại trang.");
+    }
+  }, 6000);
+}
+
+function initAuthGate() {
+  if (startDevAuthIfRequested()) return;
+
+  const session = readAuthSession();
+  if (isAuthSessionValid(session)) {
+    startDashboardAfterAuth(session);
+    return;
+  }
+
+  clearAuthSession();
+  showLoginGate();
+  waitForGoogleAuth();
+}
+
+function startLoginBackground() {
+  if (loginBgStarted || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const canvas = el("loginBgCanvas");
+  const ctx = canvas?.getContext?.("2d");
+  if (!ctx) return;
+
+  loginBgStarted = true;
+  let dots = [];
+  const resize = () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    dots = Array.from({ length: 80 }, () => ({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      r: Math.random() * 1.6 + 0.5,
+      vx: (Math.random() - 0.5) * 0.3,
+      vy: (Math.random() - 0.5) * 0.3,
+      a: Math.random() * 0.55 + 0.2,
+    }));
+  };
+  const draw = () => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    dots.forEach((dot) => {
+      dot.x += dot.vx;
+      dot.y += dot.vy;
+      if (dot.x < 0) dot.x = canvas.width;
+      if (dot.x > canvas.width) dot.x = 0;
+      if (dot.y < 0) dot.y = canvas.height;
+      if (dot.y > canvas.height) dot.y = 0;
+      ctx.beginPath();
+      ctx.arc(dot.x, dot.y, dot.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(249,115,22,${dot.a})`;
+      ctx.fill();
+    });
+    window.requestAnimationFrame(draw);
+  };
+
+  resize();
+  draw();
+  window.addEventListener("resize", resize);
+}
 
 function compactNumber(value, suffix = "") {
   const n = Number(value) || 0;
@@ -1770,6 +2064,208 @@ function keyLabel(key) {
   }[key] || key;
 }
 
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.message || data.error || `${response.status} ${url}`);
+  }
+  return data;
+}
+
+function showAdminError(message = "") {
+  const banner = el("adminError");
+  if (!message) {
+    banner.hidden = true;
+    banner.textContent = "";
+    return;
+  }
+  banner.hidden = false;
+  banner.innerHTML = `
+    <strong>Lỗi quyền truy cập</strong>
+    <div><span>${escapeHtml(message)}</span></div>
+  `;
+}
+
+function roleLabel(role) {
+  if (!role) return "-";
+  return role === "admin" ? "Admin" : "Viewer";
+}
+
+function statusLabelAdmin(status) {
+  return status === "suspended" ? "Tạm tắt" : "Đang bật";
+}
+
+function renderAdminUsers(users = []) {
+  el("adminUsersSummary").textContent = users.length ? `${formatVnd.format(users.length)} user` : "";
+  if (!users.length) {
+    el("adminUsersTable").innerHTML = '<div class="empty">Chưa có user trong Firebase.</div>';
+    return;
+  }
+
+  el("adminUsersTable").innerHTML = `
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Email</th>
+          <th>Tên</th>
+          <th>Role</th>
+          <th>Trạng thái</th>
+          <th>Lần vào gần nhất</th>
+          <th class="num">Số lần</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${users.map((user) => `
+          <tr>
+            <td>${escapeHtml(user.email || "")}</td>
+            <td>${escapeHtml(user.name || "")}</td>
+            <td>
+              <select class="admin-select" data-admin-role="${escapeHtml(user.email || "")}">
+                <option value="viewer"${user.role !== "admin" ? " selected" : ""}>Viewer</option>
+                <option value="admin"${user.role === "admin" ? " selected" : ""}>Admin</option>
+              </select>
+            </td>
+            <td>
+              <select class="admin-select" data-admin-status="${escapeHtml(user.email || "")}">
+                <option value="active"${user.status !== "suspended" ? " selected" : ""}>Đang bật</option>
+                <option value="suspended"${user.status === "suspended" ? " selected" : ""}>Tạm tắt</option>
+              </select>
+            </td>
+            <td>${escapeHtml(formatTimestampDisplay(user.lastLoginAt || ""))}</td>
+            <td class="num">${formatVnd.format(user.loginCount || 0)}</td>
+            <td class="num"><button class="banner-link admin-save-user" type="button" data-admin-save="${escapeHtml(user.email || "")}">Lưu</button></td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderAuditLogs(logs = []) {
+  el("adminAuditSummary").textContent = logs.length ? `${formatVnd.format(logs.length)} log gần nhất` : "";
+  if (!logs.length) {
+    el("adminAuditTable").innerHTML = '<div class="empty">Chưa có audit log.</div>';
+    return;
+  }
+
+  el("adminAuditTable").innerHTML = `
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Thời gian</th>
+          <th>Email</th>
+          <th>Kết quả</th>
+          <th>Role</th>
+          <th>Lý do</th>
+          <th>IP</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${logs.map((log) => `
+          <tr>
+            <td>${escapeHtml(formatTimestampDisplay(log.createdAt || ""))}</td>
+            <td>${escapeHtml(log.email || "")}</td>
+            <td><span class="admin-badge ${log.result === "success" ? "ok" : "blocked"}">${escapeHtml(log.result || "")}</span></td>
+            <td>${escapeHtml(roleLabel(log.role || ""))}</td>
+            <td>${escapeHtml(log.reason || "")}</td>
+            <td>${escapeHtml(log.ip || "")}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+async function loadAdminData(force = false) {
+  if (!isAdminSession(state.authSession)) return;
+  if (state.adminLoaded && !force) return;
+
+  showAdminError("");
+  el("adminUsersTable").innerHTML = '<div class="empty">Đang tải user...</div>';
+  el("adminAuditTable").innerHTML = '<div class="empty">Đang tải audit...</div>';
+
+  try {
+    const [usersData, auditData] = await Promise.all([
+      fetchJson("/api/admin/users"),
+      fetchJson("/api/admin/audit?limit=100"),
+    ]);
+    renderAdminUsers(usersData.users || []);
+    renderAuditLogs(auditData.logs || []);
+    state.adminLoaded = true;
+  } catch (error) {
+    showAdminError(error.message);
+    el("adminUsersTable").innerHTML = '<div class="empty">Không tải được danh sách user.</div>';
+    el("adminAuditTable").innerHTML = '<div class="empty">Không tải được audit log.</div>';
+  }
+}
+
+async function saveAdminUser(email) {
+  const role = document.querySelector(`[data-admin-role="${CSS.escape(email)}"]`)?.value || "viewer";
+  const status = document.querySelector(`[data-admin-status="${CSS.escape(email)}"]`)?.value || "active";
+  showAdminError("");
+  try {
+    await fetchJson("/api/admin/users", {
+      method: "POST",
+      body: JSON.stringify({
+        email,
+        role,
+        status,
+        permissions: {
+          dashboard: status === "active",
+          admin: status === "active" && role === "admin",
+        },
+      }),
+    });
+    state.adminLoaded = false;
+    await loadAdminData(true);
+  } catch (error) {
+    showAdminError(error.message);
+  }
+}
+
+async function addAdminUser(event) {
+  event.preventDefault();
+  const emailInput = el("adminNewUserEmail");
+  const roleInput = el("adminNewUserRole");
+  const email = String(emailInput.value || "").trim().toLowerCase();
+  const role = roleInput.value === "admin" ? "admin" : "viewer";
+
+  if (!isAllowedEmail(email)) {
+    showAdminError(`Email phải thuộc domain @${AUTH_CONFIG.allowedDomain}.`);
+    return;
+  }
+
+  showAdminError("");
+  try {
+    await fetchJson("/api/admin/users", {
+      method: "POST",
+      body: JSON.stringify({
+        email,
+        role,
+        status: "active",
+        permissions: {
+          dashboard: true,
+          admin: role === "admin",
+        },
+      }),
+    });
+    emailInput.value = "";
+    roleInput.value = "viewer";
+    state.adminLoaded = false;
+    await loadAdminData(true);
+  } catch (error) {
+    showAdminError(error.message);
+  }
+}
+
 function render() {
   renderKpis(state.filtered.province);
   renderProvinceMap(state.filtered.mapProvince, state.filtered.mapOrder);
@@ -1778,6 +2274,10 @@ function render() {
 }
 
 function setActiveTab(targetId) {
+  if (targetId === "adminPanel" && !isAdminSession(state.authSession)) {
+    targetId = "dashboardPanel";
+  }
+
   document.querySelectorAll(".tab-button").forEach((button) => {
     const active = button.dataset.tabTarget === targetId;
     button.classList.toggle("active", active);
@@ -1790,7 +2290,8 @@ function setActiveTab(targetId) {
     panel.classList.toggle("active", active);
   });
 
-  document.querySelector(".app-shell")?.classList.toggle("method-active", targetId === "methodPanel");
+  document.querySelector(".app-shell")?.classList.toggle("method-active", targetId !== "dashboardPanel");
+  if (targetId === "adminPanel") loadAdminData();
 }
 
 async function loadData() {
@@ -1944,12 +2445,16 @@ function scheduleBackgroundLoad(task, timeout) {
 
 document.addEventListener("click", (event) => {
   if (event.target.closest?.("#pendingDetailOpen")) openPendingDetails();
+  if (event.target.closest?.("#adminRefreshButton")) loadAdminData(true);
+  const saveButton = event.target.closest?.(".admin-save-user");
+  if (saveButton) saveAdminUser(saveButton.dataset.adminSave);
 });
 
 el("pendingDetailClose").addEventListener("click", closePendingDetails);
 el("pendingDetailDialog").addEventListener("click", (event) => {
   if (event.target === el("pendingDetailDialog")) closePendingDetails();
 });
+el("adminAddUserForm").addEventListener("submit", addAdminUser);
 el("mapBack").addEventListener("click", () => {
   el("provinceFilter").value = "";
   state.selectedDistrict = "";
@@ -1960,12 +2465,18 @@ document.querySelectorAll(".tab-button").forEach((button) => {
   button.addEventListener("click", () => setActiveTab(button.dataset.tabTarget));
 });
 
-loadData().catch((error) => {
-  console.error(error);
-  const banner = el("qualityBanner");
-  banner.hidden = false;
-  banner.innerHTML = `
-    <strong>Lỗi dữ liệu</strong>
-    <div><span>Không tải được dữ liệu: ${escapeHtml(error.message)}</span></div>
-  `;
+el("signOutButton").addEventListener("click", async () => {
+  clearAuthSession();
+  state.authSession = null;
+  try {
+    await fetch("/api/logout", { method: "POST", keepalive: true });
+  } catch (error) {
+    console.warn("Cannot clear server session", error);
+  }
+  window.google?.accounts?.id?.disableAutoSelect();
+  const url = new URL(window.location.href);
+  url.searchParams.delete("devAuth");
+  window.location.href = url.toString();
 });
+
+initAuthGate();
