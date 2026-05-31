@@ -15,6 +15,9 @@ from urllib.parse import quote
 
 APP_DIR = Path(__file__).resolve().parents[1]
 ENV_PATH = APP_DIR / ".env.r2"
+STALE_REMOTE_FILES = [
+    "rollups/order_index.csv.gz",
+]
 def load_env(path):
     values = {}
     if path.exists():
@@ -36,8 +39,7 @@ def signing_key(secret_key, date_stamp, region="auto", service="s3"):
     return hmac.new(key, b"aws4_request", hashlib.sha256).digest()
 
 
-def upload_file(cfg, source_path, object_key):
-    body = source_path.read_bytes()
+def signed_r2_request(cfg, method, object_key, body=b"", content_type=None):
     payload_hash = hashlib.sha256(body).hexdigest()
     now = dt.datetime.utcnow()
     amz_date = now.strftime("%Y%m%dT%H%M%SZ")
@@ -51,22 +53,20 @@ def upload_file(cfg, source_path, object_key):
     encoded_key = "/".join(quote(part, safe="") for part in object_key.split("/"))
     canonical_uri = f"/{bucket}/{encoded_key}"
     url = f"https://{host}{canonical_uri}"
-    content_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
-    if source_path.suffix == ".gz":
-      content_type = "application/gzip"
 
     headers = {
         "Cache-Control": "public, max-age=0, must-revalidate",
-        "Content-Type": content_type,
         "Host": host,
         "X-Amz-Content-Sha256": payload_hash,
         "X-Amz-Date": amz_date,
     }
+    if content_type:
+        headers["Content-Type"] = content_type
     signed_header_names = sorted(k.lower() for k in headers)
     canonical_headers = "".join(f"{name}:{headers[next(k for k in headers if k.lower() == name)].strip()}\n" for name in signed_header_names)
     signed_headers = ";".join(signed_header_names)
     canonical_request = "\n".join([
-        "PUT",
+        method,
         canonical_uri,
         "",
         canonical_headers,
@@ -92,13 +92,26 @@ def upload_file(cfg, source_path, object_key):
         f"Signature={signature}"
     )
 
-    request = urllib.request.Request(url, data=body, headers=headers, method="PUT")
+    data = body if method != "DELETE" else None
+    request = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(request, timeout=120) as response:
             return response.status
     except urllib.error.HTTPError as error:
         detail = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Upload failed for {object_key}: HTTP {error.code} {detail}") from error
+        raise RuntimeError(f"{method} failed for {object_key}: HTTP {error.code} {detail}") from error
+
+
+def upload_file(cfg, source_path, object_key):
+    body = source_path.read_bytes()
+    content_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
+    if source_path.suffix == ".gz":
+        content_type = "application/gzip"
+    return signed_r2_request(cfg, "PUT", object_key, body, content_type)
+
+
+def delete_file(cfg, object_key):
+    return signed_r2_request(cfg, "DELETE", object_key)
 
 
 def main():
@@ -133,6 +146,14 @@ def main():
         status = upload_file(cfg, source, key)
         uploaded.append((key, source.stat().st_size, status))
         print(f"Uploaded {key} ({source.stat().st_size:,} bytes)")
+
+    uploaded_relatives = {path.relative_to(data_dir).as_posix() for path in files}
+    for stale_relative in STALE_REMOTE_FILES:
+        if stale_relative in uploaded_relatives:
+            continue
+        stale_key = f"{prefix}/{stale_relative}" if prefix else stale_relative
+        delete_file(cfg, stale_key)
+        print(f"Deleted stale object {stale_key}")
 
     public_base = (cfg.get("R2_PUBLIC_BASE") or "").rstrip("/")
     if public_base:
