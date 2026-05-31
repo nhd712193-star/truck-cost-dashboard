@@ -1710,7 +1710,7 @@ async function loadData() {
   state.wardError = null;
   state.orderIndexLoading = Boolean(rollups.order_index);
   state.orderIndexError = null;
-  state.map = await fetch("./assets/vietnam-provinces.geojson").then((r) => r.json());
+  state.map = JSON.parse(await fetchTextMaybeGzip("./assets/vietnam-provinces.geojson.gz"));
 
   const dates = state.data.daily.map((r) => r.cost_date).sort();
   const defaultRange = defaultCompleteMonthRange(state.data.daily, 3);
