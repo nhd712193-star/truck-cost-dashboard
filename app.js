@@ -3,6 +3,7 @@ const LOCAL_DATA_BASE = "./data";
 const isLocalHost = ["localhost", "127.0.0.1", ""].includes(location.hostname);
 const DATA_BASE = new URLSearchParams(location.search).get("dataBase")
   || (isLocalHost ? LOCAL_DATA_BASE : REMOTE_DATA_BASE);
+const ORDER_INDEX_DELAY_MS = 8000;
 
 const state = {
   data: {},
@@ -14,6 +15,8 @@ const state = {
   districtMap: null,
   districtMapPromise: null,
   selectedDistrict: "",
+  wardLoading: false,
+  wardError: null,
   orderIndexLoading: false,
   orderIndexError: null,
 };
@@ -477,7 +480,7 @@ function addByProvince(map, row) {
 function filteredRollup(rows, filters, byProvince = false) {
   const filtered = [];
   const provinceMap = byProvince ? new Map() : null;
-  rows.forEach((row) => {
+  (rows || []).forEach((row) => {
     if (!matchesBaseFilters(row, filters)) return;
     filtered.push(row);
     if (provinceMap) addByProvince(provinceMap, row);
@@ -567,8 +570,12 @@ function renderKpis(rows) {
   );
   setMetric(
     "kpiCostOrder",
-    totals.readyOrders ? money(totals.cost / totals.readyOrders) : "-",
-    totals.readyOrders ? `Tính trên ${orderUnit} đã có chi phí` : "Chưa có chi phí trong phạm vi lọc",
+    state.orderIndexLoading && !state.data.order_index
+      ? "Đang tải..."
+      : totals.readyOrders ? money(totals.cost / totals.readyOrders) : "-",
+    state.orderIndexLoading && !state.data.order_index
+      ? "Đang tải số đơn unique chính xác"
+      : totals.readyOrders ? `Tính trên ${orderUnit} đã có chi phí` : "Chưa có chi phí trong phạm vi lọc",
   );
   renderQualityBanner(totals);
 }
@@ -1412,6 +1419,26 @@ function renderDistrictMap(selectedProvince) {
   const mapTarget = el("provinceMap");
   setMapMode("district", selectedProvince);
 
+  if (state.wardLoading && !state.data.ward) {
+    mapTarget.innerHTML = '<div class="empty">Đang tải dữ liệu quận/huyện...</div>';
+    el("mapNote").textContent = `${selectedProvince} | đang tải dữ liệu chi tiết`;
+    el("mapLegend").innerHTML = "";
+    el("mapRanking").innerHTML = "";
+    el("mapDetailTitle").textContent = "Quận/huyện thấp nhất";
+    el("mapDetail").innerHTML = "";
+    return;
+  }
+
+  if (state.wardError && !state.data.ward) {
+    mapTarget.innerHTML = '<div class="empty">Không tải được dữ liệu quận/huyện</div>';
+    el("mapNote").textContent = `${selectedProvince} | lỗi dữ liệu chi tiết`;
+    el("mapLegend").innerHTML = "";
+    el("mapRanking").innerHTML = "";
+    el("mapDetailTitle").textContent = "Quận/huyện thấp nhất";
+    el("mapDetail").innerHTML = "";
+    return;
+  }
+
   if (!state.districtMap?.features?.length) {
     mapTarget.innerHTML = '<div class="empty">Đang tải bản đồ quận/huyện...</div>';
     el("mapNote").textContent = `Đang mở chi tiết ${selectedProvince}`;
@@ -1676,9 +1703,11 @@ async function loadData() {
   state.manifest = manifest;
   const rollups = Object.fromEntries((manifest.rollups || []).map((r) => [r.name, r.file]));
   const entries = await Promise.all(
-    ["daily", "province", "ward"].map((name) => loadRollup(name, rollups)),
+    ["daily", "province"].map((name) => loadRollup(name, rollups)),
   );
   state.data = Object.fromEntries(entries);
+  state.wardLoading = Boolean(rollups.ward);
+  state.wardError = null;
   state.orderIndexLoading = Boolean(rollups.order_index);
   state.orderIndexError = null;
   state.map = await fetch("./assets/vietnam-provinces.geojson").then((r) => r.json());
@@ -1694,8 +1723,12 @@ async function loadData() {
 
   applyFilters();
 
+  if (rollups.ward) {
+    loadWard(rollups);
+  }
+
   if (rollups.order_index) {
-    loadOrderIndex(rollups);
+    scheduleBackgroundLoad(() => loadOrderIndex(rollups), ORDER_INDEX_DELAY_MS);
   }
 }
 
@@ -1719,6 +1752,29 @@ async function loadOrderIndex(rollups) {
     state.filterCache = null;
     applyFilters();
   }
+}
+
+async function loadWard(rollups) {
+  try {
+    const [, rows] = await loadRollup("ward", rollups);
+    state.data.ward = rows;
+    state.wardError = null;
+  } catch (error) {
+    console.error(error);
+    state.wardError = error;
+  } finally {
+    state.wardLoading = false;
+    state.filterCache = null;
+    applyFilters();
+  }
+}
+
+function scheduleBackgroundLoad(task, timeout) {
+  if ("requestIdleCallback" in window) {
+    window.requestIdleCallback(task, { timeout });
+    return;
+  }
+  window.setTimeout(task, timeout);
 }
 
 ["dateFrom", "dateTo", "typeFilter", "statusFilter", "provinceFilter"].forEach((id) => {
