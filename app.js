@@ -14,6 +14,8 @@ const state = {
   districtMap: null,
   districtMapPromise: null,
   selectedDistrict: "",
+  orderIndexLoading: false,
+  orderIndexError: null,
 };
 
 const el = (id) => document.getElementById(id);
@@ -587,7 +589,11 @@ function renderQualityBanner(totals) {
     messages.push(`${dateText ? `Từ ${dateText}` : "Giai đoạn này"} có ${compactNumber(pendingCount)} ${orderUnit} chưa có chi phí thuê xe.`);
   }
 
-  if (missingOrderIndex) {
+  if (state.orderIndexLoading) {
+    messages.push("Đang tải số đơn unique; dashboard sẽ tự cập nhật sau khi tải xong.");
+  } else if (state.orderIndexError) {
+    messages.push("Không tải được order_index; số đơn có thể là lượt trong các lát dữ liệu, không phải đơn unique.");
+  } else if (missingOrderIndex) {
     messages.push("Không có order_index; số đơn có thể là lượt trong các lát dữ liệu, không phải đơn unique.");
   }
 
@@ -1669,17 +1675,12 @@ async function loadData() {
   const manifest = await fetch(`${DATA_BASE}/manifest.json`).then((r) => r.json());
   state.manifest = manifest;
   const rollups = Object.fromEntries((manifest.rollups || []).map((r) => [r.name, r.file]));
-  const names = ["daily", "province", "ward"];
-  if (rollups.order_index) names.push("order_index");
   const entries = await Promise.all(
-    names.map(async (name) => {
-      const file = rollups[name] || `rollups/${name}.csv.gz`;
-      const text = await fetchTextMaybeGzip(`${DATA_BASE}/${file}`);
-      const rows = parseCsv(text).map(name === "order_index" ? normalizeOrderIndex : normalize);
-      return [name, rows];
-    }),
+    ["daily", "province", "ward"].map((name) => loadRollup(name, rollups)),
   );
   state.data = Object.fromEntries(entries);
+  state.orderIndexLoading = Boolean(rollups.order_index);
+  state.orderIndexError = null;
   state.map = await fetch("./assets/vietnam-provinces.geojson").then((r) => r.json());
 
   const dates = state.data.daily.map((r) => r.cost_date).sort();
@@ -1692,6 +1693,32 @@ async function loadData() {
   el("dataFootnote").textContent = `Cập nhật: ${formatTimestampDisplay(manifest.generated_at) || "N/A"}.`;
 
   applyFilters();
+
+  if (rollups.order_index) {
+    loadOrderIndex(rollups);
+  }
+}
+
+async function loadRollup(name, rollups) {
+  const file = rollups[name] || `rollups/${name}.csv.gz`;
+  const text = await fetchTextMaybeGzip(`${DATA_BASE}/${file}`);
+  const rows = parseCsv(text).map(name === "order_index" ? normalizeOrderIndex : normalize);
+  return [name, rows];
+}
+
+async function loadOrderIndex(rollups) {
+  try {
+    const [, rows] = await loadRollup("order_index", rollups);
+    state.data.order_index = rows;
+    state.orderIndexError = null;
+  } catch (error) {
+    console.error(error);
+    state.orderIndexError = error;
+  } finally {
+    state.orderIndexLoading = false;
+    state.filterCache = null;
+    applyFilters();
+  }
 }
 
 ["dateFrom", "dateTo", "typeFilter", "statusFilter", "provinceFilter"].forEach((id) => {
