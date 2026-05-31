@@ -37,7 +37,7 @@ prod/manifest.json
 prod/rollups/daily.csv.gz
 prod/rollups/province.csv.gz
 prod/rollups/ward.csv.gz
-prod/rollups/order_index.csv.gz
+prod/rollups/order_index/month=YYYY-MM.csv.gz
 ```
 
 Dashboard đọc data bằng query param trong giai đoạn đầu:
@@ -170,13 +170,14 @@ cần deploy lại Vercel nếu code dashboard không đổi.
 
 Khi data nhiều lên, không đưa data vào Vercel/GitHub. Tiếp tục để data ở R2.
 
-Nếu `order_index.csv.gz` quá lớn, bước tối ưu tiếp theo là chia theo tháng:
+`order_index` đã được chia theo tháng:
 
 ```text
-prod/order_index/2025-01.csv.gz
-prod/order_index/2025-02.csv.gz
+prod/rollups/order_index/month=2025-01.csv.gz
+prod/rollups/order_index/month=2025-02.csv.gz
 ...
 ```
 
-Dashboard sẽ chỉ tải index của các tháng nằm trong filter, thay vì tải một file
-`order_index.csv.gz` rất lớn.
+Dashboard chỉ tải index của các tháng nằm trong filter, thay vì tải một file
+`order_index.csv.gz` rất lớn. Nếu người dùng chọn cả 12 tháng và vẫn thấy chậm,
+bước tối ưu tiếp theo là chia nhỏ hơn theo `month + province`.

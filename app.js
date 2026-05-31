@@ -3,7 +3,7 @@ const LOCAL_DATA_BASE = "./data";
 const isLocalHost = ["localhost", "127.0.0.1", ""].includes(location.hostname);
 const DATA_BASE = new URLSearchParams(location.search).get("dataBase")
   || (isLocalHost ? LOCAL_DATA_BASE : REMOTE_DATA_BASE);
-const ORDER_INDEX_DELAY_MS = 8000;
+const ORDER_INDEX_DELAY_MS = 1500;
 
 const state = {
   data: {},
@@ -19,6 +19,11 @@ const state = {
   wardError: null,
   orderIndexLoading: false,
   orderIndexError: null,
+  orderIndexPartitions: [],
+  orderIndexPartitionsByMonth: new Map(),
+  orderIndexRowsByMonth: new Map(),
+  orderIndexLoadsByMonth: new Map(),
+  orderIndexFallbackRollup: "",
 };
 
 const el = (id) => document.getElementById(id);
@@ -488,6 +493,89 @@ function filteredRollup(rows, filters, byProvince = false) {
   return byProvince ? { filtered, provinceMap } : { filtered };
 }
 
+function monthIndex(month) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  return Number.isFinite(year) && Number.isFinite(monthNumber)
+    ? year * 12 + monthNumber - 1
+    : null;
+}
+
+function monthFromIndex(index) {
+  const year = Math.floor(index / 12);
+  const month = (index % 12) + 1;
+  return `${year}-${String(month).padStart(2, "0")}`;
+}
+
+function monthKeysBetween(from, to) {
+  const fromMonth = from?.slice(0, 7);
+  const toMonth = to?.slice(0, 7);
+  const start = monthIndex(fromMonth || "");
+  const end = monthIndex(toMonth || "");
+  if (start === null || end === null || start > end) return [];
+
+  const months = [];
+  for (let index = start; index <= end; index += 1) {
+    months.push(monthFromIndex(index));
+  }
+  return months;
+}
+
+function dailyDateBounds() {
+  const dates = (state.data.daily || [])
+    .map((row) => row.cost_date)
+    .filter(Boolean)
+    .sort();
+  return {
+    from: dates[0] || "",
+    to: dates[dates.length - 1] || "",
+  };
+}
+
+function filterDateRange(filters) {
+  const bounds = dailyDateBounds();
+  return {
+    from: filters.from || bounds.from,
+    to: filters.to || bounds.to,
+  };
+}
+
+function orderIndexMonthsForFilters(filters) {
+  if (!state.orderIndexPartitionsByMonth.size) return [];
+  const { from, to } = filterDateRange(filters);
+  return monthKeysBetween(from, to)
+    .filter((month) => state.orderIndexPartitionsByMonth.has(month));
+}
+
+function missingOrderIndexMonths(filters) {
+  return orderIndexMonthsForFilters(filters)
+    .filter((month) => !state.orderIndexRowsByMonth.has(month));
+}
+
+function updateOrderIndexLoadingState(filters) {
+  if (state.data.order_index) {
+    state.orderIndexLoading = false;
+    return;
+  }
+
+  if (state.orderIndexPartitionsByMonth.size) {
+    state.orderIndexLoading = !state.orderIndexError && missingOrderIndexMonths(filters).length > 0;
+    return;
+  }
+
+  state.orderIndexLoading = Boolean(state.orderIndexFallbackRollup && !state.orderIndexError);
+}
+
+function orderIndexRowsForFilters(filters) {
+  if (state.data.order_index) return state.data.order_index;
+  if (!state.orderIndexPartitionsByMonth.size) return null;
+
+  const months = orderIndexMonthsForFilters(filters);
+  const missingMonths = months.filter((month) => !state.orderIndexRowsByMonth.has(month));
+  if (missingMonths.length) return null;
+
+  return months.flatMap((month) => state.orderIndexRowsByMonth.get(month) || []);
+}
+
 function getFilterCache(filters) {
   const key = baseFilterKey(filters);
   if (state.filterCache?.key === key) return state.filterCache;
@@ -497,10 +585,11 @@ function getFilterCache(filters) {
   const ward = filteredRollup(state.data.ward, filters, true);
   const orderByProvince = new Map();
   let order = null;
+  const orderRows = orderIndexRowsForFilters(filters);
 
-  if (state.data.order_index) {
+  if (orderRows) {
     order = [];
-    state.data.order_index.forEach((row) => {
+    orderRows.forEach((row) => {
       if (!matchesBaseFilters(row, filters)) return;
       order.push(row);
       addByProvince(orderByProvince, row);
@@ -528,7 +617,8 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-function applyFilters() {
+function applyFilters(options = {}) {
+  const loadOrderIndex = options.loadOrderIndex !== false;
   const from = el("dateFrom").value;
   const to = el("dateTo").value;
   const type = el("typeFilter").value;
@@ -545,7 +635,9 @@ function applyFilters() {
     state.selectedDistrict = "";
   }
   state.filters = { from, to, type, status, province };
-  const base = getFilterCache({ from, to, type, status });
+  const baseFilters = { from, to, type, status };
+  updateOrderIndexLoadingState(baseFilters);
+  const base = getFilterCache(baseFilters);
 
   state.filtered = {
     daily: province ? (base.provinceByProvince.get(province) || []) : base.daily,
@@ -557,6 +649,9 @@ function applyFilters() {
   };
 
   render();
+  if (loadOrderIndex) {
+    ensureOrderIndexForCurrentFilters();
+  }
 }
 
 function renderKpis(rows) {
@@ -570,10 +665,10 @@ function renderKpis(rows) {
   );
   setMetric(
     "kpiCostOrder",
-    state.orderIndexLoading && !state.data.order_index
+    state.orderIndexLoading && !state.filtered.order
       ? "Đang tải..."
       : totals.readyOrders ? money(totals.cost / totals.readyOrders) : "-",
-    state.orderIndexLoading && !state.data.order_index
+    state.orderIndexLoading && !state.filtered.order
       ? "Đang tải số đơn unique chính xác"
       : totals.readyOrders ? `Tính trên ${orderUnit} đã có chi phí` : "Chưa có chi phí trong phạm vi lọc",
   );
@@ -585,7 +680,7 @@ function renderQualityBanner(totals) {
   const pendingDetails = pendingOrderDetails();
   const dateText = pendingDetails.dateText;
   const hasFullPeriodPending = totals.orders > 0 && totals.weightKg > 0 && totals.cost === 0;
-  const missingOrderIndex = !state.data.order_index;
+  const missingOrderIndex = !state.filtered.order;
   const messages = [];
   const pendingCount = pendingDetails.totalUnique || totals.pendingOrders;
   const orderUnit = totals.hasUniqueOrders ? "đơn unique" : "lượt đơn";
@@ -596,9 +691,9 @@ function renderQualityBanner(totals) {
     messages.push(`${dateText ? `Từ ${dateText}` : "Giai đoạn này"} có ${compactNumber(pendingCount)} ${orderUnit} chưa có chi phí thuê xe.`);
   }
 
-  if (state.orderIndexLoading) {
+  if (state.orderIndexLoading && missingOrderIndex) {
     messages.push("Đang tải số đơn unique; dashboard sẽ tự cập nhật sau khi tải xong.");
-  } else if (state.orderIndexError) {
+  } else if (state.orderIndexError && missingOrderIndex) {
     messages.push("Không tải được order_index; số đơn có thể là lượt trong các lát dữ liệu, không phải đơn unique.");
   } else if (missingOrderIndex) {
     messages.push("Không có order_index; số đơn có thể là lượt trong các lát dữ liệu, không phải đơn unique.");
@@ -1702,13 +1797,20 @@ async function loadData() {
   const manifest = await fetch(`${DATA_BASE}/manifest.json`).then((r) => r.json());
   state.manifest = manifest;
   const rollups = Object.fromEntries((manifest.rollups || []).map((r) => [r.name, r.file]));
+  state.orderIndexPartitions = manifest.order_index_partitions || [];
+  state.orderIndexPartitionsByMonth = new Map(
+    state.orderIndexPartitions.map((partition) => [partition.month, partition]),
+  );
+  state.orderIndexRowsByMonth = new Map();
+  state.orderIndexLoadsByMonth = new Map();
+  state.orderIndexFallbackRollup = rollups.order_index || "";
   const entries = await Promise.all(
     ["daily", "province"].map((name) => loadRollup(name, rollups)),
   );
   state.data = Object.fromEntries(entries);
   state.wardLoading = Boolean(rollups.ward);
   state.wardError = null;
-  state.orderIndexLoading = Boolean(rollups.order_index);
+  state.orderIndexLoading = Boolean(state.orderIndexPartitions.length || state.orderIndexFallbackRollup);
   state.orderIndexError = null;
   state.map = JSON.parse(await fetchTextMaybeGzip("./assets/vietnam-provinces.geojson.gz"));
 
@@ -1721,13 +1823,15 @@ async function loadData() {
   setOptions(el("provinceFilter"), state.data.province.map((r) => r.to_province_name));
   el("dataFootnote").textContent = `Cập nhật: ${formatTimestampDisplay(manifest.generated_at) || "N/A"}.`;
 
-  applyFilters();
+  applyFilters({ loadOrderIndex: false });
 
   if (rollups.ward) {
     loadWard(rollups);
   }
 
-  if (rollups.order_index) {
+  if (state.orderIndexPartitions.length) {
+    scheduleBackgroundLoad(() => ensureOrderIndexForCurrentFilters(), ORDER_INDEX_DELAY_MS);
+  } else if (state.orderIndexFallbackRollup) {
     scheduleBackgroundLoad(() => loadOrderIndex(rollups), ORDER_INDEX_DELAY_MS);
   }
 }
@@ -1750,7 +1854,64 @@ async function loadOrderIndex(rollups) {
   } finally {
     state.orderIndexLoading = false;
     state.filterCache = null;
-    applyFilters();
+    applyFilters({ loadOrderIndex: false });
+  }
+}
+
+async function loadOrderIndexMonth(month) {
+  if (state.orderIndexRowsByMonth.has(month)) return;
+  if (state.orderIndexLoadsByMonth.has(month)) {
+    await state.orderIndexLoadsByMonth.get(month);
+    return;
+  }
+
+  const partition = state.orderIndexPartitionsByMonth.get(month);
+  if (!partition) return;
+
+  const loadPromise = fetchTextMaybeGzip(`${DATA_BASE}/${partition.file}`)
+    .then((text) => parseCsv(text).map(normalizeOrderIndex))
+    .then((rows) => {
+      state.orderIndexRowsByMonth.set(month, rows);
+    })
+    .finally(() => {
+      state.orderIndexLoadsByMonth.delete(month);
+    });
+  state.orderIndexLoadsByMonth.set(month, loadPromise);
+  await loadPromise;
+}
+
+async function ensureOrderIndexForCurrentFilters() {
+  if (!state.orderIndexPartitionsByMonth.size) return;
+
+  const baseFilters = {
+    from: state.filters.from,
+    to: state.filters.to,
+    type: state.filters.type,
+    status: state.filters.status,
+  };
+  const months = missingOrderIndexMonths(baseFilters);
+  if (!months.length) {
+    updateOrderIndexLoadingState(baseFilters);
+    return;
+  }
+
+  state.orderIndexLoading = true;
+  try {
+    await Promise.all(months.map(loadOrderIndexMonth));
+    state.orderIndexError = null;
+  } catch (error) {
+    console.error(error);
+    state.orderIndexError = error;
+  } finally {
+    state.filterCache = null;
+    const currentFilters = {
+      from: state.filters.from,
+      to: state.filters.to,
+      type: state.filters.type,
+      status: state.filters.status,
+    };
+    updateOrderIndexLoadingState(currentFilters);
+    applyFilters({ loadOrderIndex: false });
   }
 }
 
@@ -1765,7 +1926,7 @@ async function loadWard(rollups) {
   } finally {
     state.wardLoading = false;
     state.filterCache = null;
-    applyFilters();
+    applyFilters({ loadOrderIndex: false });
   }
 }
 

@@ -15,15 +15,6 @@ from urllib.parse import quote
 
 APP_DIR = Path(__file__).resolve().parents[1]
 ENV_PATH = APP_DIR / ".env.r2"
-REQUIRED_FILES = [
-    "manifest.json",
-    "rollups/daily.csv.gz",
-    "rollups/province.csv.gz",
-    "rollups/ward.csv.gz",
-    "rollups/order_index.csv.gz",
-]
-
-
 def load_env(path):
     values = {}
     if path.exists():
@@ -129,10 +120,15 @@ def main():
     prefix = cfg.get("R2_PREFIX", "prod").strip("/")
     data_dir = APP_DIR / "data"
     uploaded = []
-    for relative in REQUIRED_FILES:
-        source = data_dir / relative
-        if not source.exists():
-            raise FileNotFoundError(source)
+    if not data_dir.exists():
+        raise FileNotFoundError(data_dir)
+
+    files = sorted(path for path in data_dir.rglob("*") if path.is_file())
+    if not files:
+        raise FileNotFoundError(f"No files found in {data_dir}")
+
+    for source in files:
+        relative = source.relative_to(data_dir).as_posix()
         key = f"{prefix}/{relative}" if prefix else relative
         status = upload_file(cfg, source, key)
         uploaded.append((key, source.stat().st_size, status))

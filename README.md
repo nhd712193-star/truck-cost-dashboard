@@ -34,11 +34,13 @@ data/manifest.json
 data/rollups/daily.csv.gz
 data/rollups/province.csv.gz
 data/rollups/ward.csv.gz
-data/rollups/order_index.csv.gz
+data/rollups/order_index/month=YYYY-MM.csv.gz
 ```
 
-`order_index.csv.gz` dùng để đếm `Đơn unique` theo `order_code`. KPI đơn không
-cộng `nb_orders`.
+`order_index` dùng để đếm `Đơn unique` theo `order_code`. KPI đơn không cộng
+`nb_orders`. Để dashboard mở nhanh hơn khi dữ liệu nhiều tháng, `order_index`
+được chia theo tháng và khai báo trong `manifest.json` bằng
+`order_index_partitions`.
 
 Nếu pipeline sinh data mới, chạy lại lệnh prepare ở trên để refresh snapshot
 trước khi deploy.
@@ -97,11 +99,16 @@ Các phương án host data khác:
 Endpoint data cần phục vụ được các file `.csv.gz` để browser fetch và giải nén.
 Không để browser đọc trực tiếp Google Drive private/local sync.
 
-Rollup hiện tại khoảng vài chục MB, file lớn nhất là:
+Rollup hiện tại khoảng vài chục MB. Phần nặng nhất là `order_index`, nhưng đã
+được chia thành các file tháng:
 
 ```text
-rollups/order_index.csv.gz ~ 33 MB
+rollups/order_index/month=2026-02.csv.gz ~ 5.7 MB
+rollups/order_index/month=2026-03.csv.gz ~ 9.4 MB
+rollups/order_index/month=2026-04.csv.gz ~ 8.3 MB
+rollups/order_index/month=2026-05.csv.gz ~ 7.9 MB
 ```
 
-Nếu dashboard cần nhanh hơn trên production, nên cân nhắc tạo thêm rollup/index
-nhỏ hơn cho các filter chính thay vì bắt browser tải toàn bộ `order_index`.
+Dashboard chỉ tải các file tháng nằm trong filter ngày hiện tại. Nếu sau này
+chọn cả 12 tháng vẫn chậm, bước tiếp theo là chia `order_index` nhỏ hơn nữa
+theo tháng + tỉnh.
