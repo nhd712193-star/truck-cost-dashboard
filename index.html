@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chi phí thuê xe B2B >=15kg</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <div class="scope-nav">
+            <span class="scope-chip">Truck Last-mile</span>
+            <nav class="tabbar" role="tablist" aria-label="Điều hướng dashboard">
+              <button id="dashboardTab" class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="dashboardPanel" data-tab-target="dashboardPanel">Dashboard</button>
+              <button id="methodTab" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="methodPanel" data-tab-target="methodPanel">READ ME</button>
+            </nav>
+          </div>
+          <div class="brand-main">
+            <h1>Chi phí thuê xe B2B</h1>
+            <div class="scope-row" aria-label="Phạm vi dashboard">
+              <span class="scope-chip scope-chip-main">Đơn >= 15kg</span>
+              <span class="scope-chip">Giao/Trả hàng</span>
+            </div>
+          </div>
+        </div>
+        <div class="toolbar">
+          <label>
+            Từ ngày
+            <input id="dateFrom" type="date" />
+          </label>
+          <label>
+            Đến ngày
+            <input id="dateTo" type="date" />
+          </label>
+          <label>
+            Loại chuyến
+            <select id="typeFilter">
+              <option value="">Tất cả</option>
+            </select>
+          </label>
+          <label>
+            Trạng thái
+            <select id="statusFilter">
+              <option value="">Tất cả</option>
+            </select>
+          </label>
+          <label>
+            Tỉnh/TP
+            <select id="provinceFilter">
+              <option value="">Tất cả</option>
+            </select>
+          </label>
+        </div>
+      </header>
+
+      <section id="dashboardPanel" class="tab-panel active" role="tabpanel" aria-labelledby="dashboardTab">
+        <section id="qualityBanner" class="quality-banner" hidden></section>
+
+        <dialog id="pendingDetailDialog" class="detail-dialog">
+          <div class="detail-dialog-head">
+            <div>
+              <h2>Đơn chưa có chi phí thuê xe</h2>
+              <span id="pendingDetailSummary"></span>
+            </div>
+            <button id="pendingDetailClose" class="icon-button" type="button" aria-label="Đóng">×</button>
+          </div>
+          <div id="pendingDetailTable" class="detail-table-wrap"></div>
+        </dialog>
+
+        <section class="kpi-grid" aria-label="KPI">
+        <article class="kpi kpi-primary">
+          <span class="metric-label">Tổng chi phí<button class="help-tip" type="button" aria-label="Giải thích Tổng chi phí" data-tip="Tổng chi phí thuê xe đã ghi nhận. Nếu còn đơn chưa có chi phí, số này chưa phải chi phí cuối cùng.">?</button></span>
+          <strong id="kpiCost">-</strong>
+          <small>Chi phí đã ghi nhận</small>
+        </article>
+        <article class="kpi kpi-rate">
+          <span class="metric-label">Chi phí/kg<button class="help-tip" type="button" aria-label="Giải thích Chi phí/kg" data-tip="Tổng chi phí chia cho tổng kg đã có chi phí thuê xe. Đơn chưa có chi phí không dùng để tính đơn giá.">?</button></span>
+          <strong id="kpiCostKg">-</strong>
+          <small>Theo kg đã có chi phí</small>
+        </article>
+        <article class="kpi kpi-rate">
+          <span class="metric-label">Chi phí/đơn<button class="help-tip" type="button" aria-label="Giải thích Chi phí/đơn" data-tip="Tổng chi phí chia cho số đơn unique đã có chi phí thuê xe. Đơn chưa có chi phí không dùng trong mẫu số.">?</button></span>
+          <strong id="kpiCostOrder">-</strong>
+          <small>Theo đơn đã có chi phí</small>
+        </article>
+      </section>
+
+      <section class="map-section">
+        <article class="panel map-panel">
+          <div class="panel-head">
+            <div>
+              <h2 id="mapTitle">Chi phí/kg theo tỉnh <button class="help-tip" type="button" aria-label="Giải thích bản đồ" data-tip="Màu càng đậm là chi phí/kg càng cao, chỉ tính phần đã có chi phí thuê xe. Tỉnh gạch chéo là còn đơn chưa có chi phí.">?</button></h2>
+              <span id="mapNote"></span>
+            </div>
+            <div class="map-actions">
+              <div id="mapLegend" class="map-legend"></div>
+            </div>
+          </div>
+          <div class="map-layout">
+            <aside class="map-side">
+              <h3 id="mapRankingTitle">Tỉnh cao nhất <button class="help-tip" type="button" aria-label="Giải thích Tỉnh cao nhất" data-tip="Top tỉnh theo chi phí/kg trong phạm vi lọc. Nên xem cùng tổng chi phí, khối lượng và số đơn chưa có chi phí.">?</button></h3>
+              <div id="mapRanking" class="map-ranking"></div>
+            </aside>
+            <div class="map-canvas">
+              <div id="mapScope" class="map-scope" hidden></div>
+              <button id="mapBack" class="map-back" type="button" hidden>Tất cả tỉnh</button>
+              <div id="provinceMap" class="province-map"></div>
+            </div>
+            <aside class="map-side detail-side">
+              <h3 id="mapDetailTitle">Tỉnh thấp nhất</h3>
+              <div id="mapDetail" class="map-detail"></div>
+            </aside>
+          </div>
+        </article>
+      </section>
+
+      <section class="chart-grid">
+        <article class="panel wide">
+          <div class="panel-head">
+            <h2>So sánh tháng gần nhất <button class="help-tip" type="button" aria-label="Giải thích so sánh tháng gần nhất" data-tip="So sánh chi phí/kg các tháng gần nhất với cùng tháng năm trước. Nếu chưa có dữ liệu năm trước, chart sẽ đánh dấu riêng thay vì vẽ số giả.">?</button></h2>
+            <span id="trendNote"></span>
+          </div>
+          <div id="trendChart" class="chart"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-head">
+            <h2>So sánh tuần gần nhất <button class="help-tip" type="button" aria-label="Giải thích so sánh tuần gần nhất" data-tip="So sánh chi phí/kg 8 tuần gần nhất trong phạm vi lọc. Màu đỏ là cao hơn bình quân, xanh là thấp hơn.">?</button></h2>
+            <span id="timeCompareNote"></span>
+          </div>
+          <div id="timeCompareChart" class="chart"></div>
+        </article>
+      </section>
+
+        <footer id="dataFootnote" class="data-footnote"></footer>
+      </section>
+
+      <section id="methodPanel" class="tab-panel method-panel" role="tabpanel" aria-labelledby="methodTab" hidden>
+        <section class="method-intro">
+          <h2>Đọc nhanh trước khi xem</h2>
+          <p>Trang này dùng để xem tiền thuê xe tải đang đắt/rẻ ở đâu. Nếu mới mở lần đầu, đọc mấy ý này trước để tránh hiểu nhầm số liệu.</p>
+        </section>
+
+        <section class="method-grid" aria-label="READ ME">
+          <article class="method-card">
+            <span class="step-kicker">01 · Mục đích</span>
+            <h3>Theo dõi chi phí thuê xe theo kg</h3>
+            <p>Phần chính của dashboard là chi phí/kg theo thời gian và theo khu vực.</p>
+            <ul>
+              <li>Tỉnh hoặc quận/huyện nào đang có chi phí/kg cao?</li>
+              <li>Tỉnh hoặc quận/huyện nào đang có chi phí/kg thấp?</li>
+              <li>Tháng và tuần gần nhất đang thay đổi như thế nào?</li>
+            </ul>
+          </article>
+
+          <article class="method-card">
+            <span class="step-kicker">02 · Phạm vi</span>
+            <h3>Dash này chỉ nói về Truck Last-mile, đơn từ 15kg</h3>
+            <p>Nói ngắn gọn: xe tải chặng giao/trả cho nhóm đơn nặng.</p>
+            <ul>
+              <li>Gồm chuyến giao hàng và trả hàng.</li>
+              <li>Chỉ lấy đơn từ 15kg trở lên.</li>
+              <li>Chuyến lấy hàng chưa đưa vào bản này.</li>
+            </ul>
+          </article>
+
+          <article class="method-card">
+            <span class="step-kicker">03 · Nguồn số liệu</span>
+            <h3>Cost bắt đầu từ file Excel chuyến xe</h3>
+            <p>File Excel chi phí thuê xe được upload lên hệ thống hằng tháng. Sau đó, chi phí được phân bổ về từng đơn hàng để tính chi phí/kg.</p>
+            <ol>
+              <li>Cost được lấy từ file chi phí thuê xe.</li>
+              <li>Mỗi đơn nhận phần chi phí tương ứng theo trọng lượng.</li>
+              <li>Dashboard dùng phần cost đã phân bổ để tính chi phí/kg.</li>
+              <li>Số chi phí cuối cùng dash đang dùng là <code>total_cost</code>.</li>
+            </ol>
+          </article>
+
+          <article class="method-card">
+            <span class="step-kicker">04 · Cách đọc KPI</span>
+            <h3>Ba số đầu trang chỉ tính đơn đã có cost</h3>
+            <dl class="formula-list">
+              <div>
+                <dt>Tổng chi phí</dt>
+                <dd>Số tiền thuê xe đã ghi nhận trong khoảng lọc.</dd>
+              </div>
+              <div>
+                <dt>Chi phí/kg</dt>
+                <dd>Tổng chi phí chia cho tổng kg đã có cost.</dd>
+              </div>
+              <div>
+                <dt>Chi phí/đơn</dt>
+                <dd>Tổng chi phí chia cho số đơn unique đã có cost.</dd>
+              </div>
+            </dl>
+          </article>
+
+          <article class="method-card">
+            <span class="step-kicker">05 · Cách đọc nhanh</span>
+            <h3>Bắt đầu từ KPI, sau đó khoanh vùng trên bản đồ</h3>
+            <p>Cách đọc nhanh nhất: xem ba KPI, nhìn bản đồ tỉnh, click tỉnh để xuống quận/huyện, rồi click quận/huyện để xem phường/xã.</p>
+            <ul>
+              <li>Màu đỏ là nơi có chi phí/kg cao hơn các khu vực còn lại trong cùng phạm vi lọc.</li>
+              <li>Chart tháng và tuần chỉ xem chi phí/kg để không nhầm tăng volume với tăng đơn giá.</li>
+              <li>Nơi có quá ít đơn hoặc quá ít kg thì nên xem như dấu hiệu cần kiểm tra thêm.</li>
+            </ul>
+          </article>
+
+          <article class="method-card warning-card">
+            <span class="step-kicker">06 · Chỗ dễ đọc sai</span>
+            <h3>Lưu ý khi tháng chưa đủ cost</h3>
+            <p>Có tháng đã phát sinh đơn và kg, nhưng file Excel cost chưa được cập nhật. Khi đó dashboard chưa có đủ data để hiển thị.</p>
+          </article>
+        </section>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
