@@ -1,4 +1,4 @@
-const DEFAULT_GOOGLE_CLIENT_ID = "539088901792-2e10ph65slrgmqcsdl2906blne9c69cc.apps.googleusercontent.com";
+const DEFAULT_GOOGLE_CLIENT_ID = "788267823901-4p3ls3u8mc5i395odcccamek13tq7qtn.apps.googleusercontent.com";
 const { resolveDashboardUser } = require("./_lib/access");
 const { setSessionCookie } = require("./_lib/session");
 

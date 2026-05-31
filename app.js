@@ -5,7 +5,7 @@ const DATA_BASE = new URLSearchParams(location.search).get("dataBase")
   || (isLocalHost ? LOCAL_DATA_BASE : REMOTE_DATA_BASE);
 const ORDER_INDEX_DELAY_MS = 1500;
 const AUTH_CONFIG = {
-  googleClientId: "539088901792-2e10ph65slrgmqcsdl2906blne9c69cc.apps.googleusercontent.com",
+  googleClientId: "788267823901-4p3ls3u8mc5i395odcccamek13tq7qtn.apps.googleusercontent.com",
   allowedDomain: "ghn.vn",
   apiEndpoint: "/api/auth",
   sessionKey: "truck_cost_dashboard_session",
