@@ -9,30 +9,60 @@
   </head>
   <body class="auth-pending">
     <section id="loginGate" class="login-gate" aria-label="Xác nhận truy cập">
-      <canvas id="loginBgCanvas" class="login-bg-canvas" aria-hidden="true"></canvas>
-      <div class="login-card">
-        <div class="login-brand">
-          <div class="login-logo">NẶNG</div>
-          <div>
+      <div class="login-shell">
+        <aside class="login-brand-panel">
+          <div class="login-product-lockup">
+            <div class="ghn-logo" aria-label="Giao Hàng Nặng">
+              <span>GIAO HÀNG</span>
+              <strong>NẶNG</strong>
+            </div>
             <div class="login-kicker">GHN B2B CI</div>
-            <h1>Truck Cost Intelligence</h1>
           </div>
+
+          <div class="login-headline">
+            <p>Truck Cost Intelligence</p>
+            <h1>Xác nhận trước khi vào dashboard</h1>
+            <span>Kiểm soát chi phí thuê xe B2B, theo dõi phân quyền và audit đăng nhập trên Firebase.</span>
+          </div>
+
+          <div class="login-proof-grid" aria-label="Thông tin truy cập">
+            <div>
+              <span>Tài khoản</span>
+              <strong>@ghn.vn</strong>
+            </div>
+            <div>
+              <span>Phân quyền</span>
+              <strong>Theo vai trò</strong>
+            </div>
+            <div>
+              <span>Audit</span>
+              <strong>Ghi log</strong>
+            </div>
+          </div>
+        </aside>
+
+        <div class="login-access-panel">
+          <div class="login-access-top">
+            <span aria-hidden="true"></span>
+            Truy cập nội bộ bảo mật
+          </div>
+
+          <h2>Đăng nhập để tiếp tục</h2>
+          <p class="login-copy">Dùng tài khoản Google GHN để xác nhận quyền xem dashboard chi phí thuê xe.</p>
+          <p class="login-domain">CHỈ DÀNH CHO TÀI KHOẢN @GHN.VN</p>
+
+          <div id="googleSigninButton" class="google-signin-button"></div>
+          <div id="loginLoading" class="login-loading" hidden>
+            <span aria-hidden="true"></span>
+            Đang xác thực...
+          </div>
+          <div id="loginError" class="login-error" role="alert" hidden></div>
+
+          <footer class="login-footnote">
+            <strong>B2B Continuous Improvement</strong>
+            Liên hệ 3137802 dungnh nếu không thể đăng nhập
+          </footer>
         </div>
-
-        <p class="login-copy">Hệ thống nội bộ phân tích chi phí thuê xe B2B</p>
-        <p class="login-domain">CHỈ DÀNH CHO TÀI KHOẢN @GHN.VN</p>
-
-        <div id="googleSigninButton" class="google-signin-button"></div>
-        <div id="loginLoading" class="login-loading" hidden>
-          <span aria-hidden="true"></span>
-          Đang xác thực...
-        </div>
-        <div id="loginError" class="login-error" role="alert" hidden></div>
-
-        <footer class="login-footnote">
-          B2B Continuous Improvement<br />
-          Liên hệ vinhnt nếu không thể đăng nhập
-        </footer>
       </div>
     </section>
 

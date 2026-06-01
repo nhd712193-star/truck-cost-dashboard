@@ -289,12 +289,18 @@ function initGoogleAuth() {
     auto_select: false,
     ux_mode: "popup",
   });
+  const googleSignInButton = el("googleSigninButton");
+  const googleButtonWidth = Math.min(
+    340,
+    Math.max(280, Math.floor(googleSignInButton.getBoundingClientRect().width || 340)),
+  );
+
   window.google.accounts.id.renderButton(
-    el("googleSigninButton"),
+    googleSignInButton,
     {
       theme: "filled_black",
       size: "large",
-      width: 300,
+      width: googleButtonWidth,
       text: "signin_with",
       shape: "rectangular",
       logo_alignment: "left",
