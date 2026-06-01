@@ -122,33 +122,28 @@ body.auth-required {
 
 .login-product-lockup {
   display: flex;
-  align-items: center;
-  gap: 14px;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .ghn-logo {
-  display: inline-grid;
-  gap: 4px;
-  min-width: 142px;
-  padding: 12px 15px 13px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #f05a28 0%, #d93919 100%);
-  box-shadow: 0 16px 34px rgba(238, 84, 35, 0.34);
-  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  width: min(246px, 100%);
+  border: 1px solid rgba(255, 255, 255, 0.88);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #eef8ff 100%);
+  box-shadow:
+    0 18px 40px rgba(0, 119, 190, 0.2),
+    0 18px 34px rgba(238, 84, 35, 0.18);
+  padding: 10px 12px;
 }
 
-.ghn-logo span {
-  font-size: 10px;
-  font-weight: 900;
-  line-height: 1;
-  letter-spacing: 0.15em;
-}
-
-.ghn-logo strong {
-  font-size: 24px;
-  font-weight: 950;
-  line-height: 1.1;
-  letter-spacing: 0;
+.ghn-logo img {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 
 .login-kicker {
@@ -1663,14 +1658,8 @@ th.num {
     padding: 24px;
   }
 
-  .login-product-lockup {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 12px;
-  }
-
   .ghn-logo {
-    min-width: 132px;
+    width: min(232px, 100%);
   }
 
   .login-headline h1 {
