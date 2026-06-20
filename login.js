@@ -51,6 +51,24 @@ async function verifyAuthWithServer(credential) {
   return data;
 }
 
+async function restoreServerSession() {
+  try {
+    const response = await fetch("/api/session", {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    if (!response.ok) return false;
+    const data = await response.json().catch(() => ({}));
+    if (!data.user?.email) return false;
+    writeAuthSession(data.user, data.csrfToken || "");
+    window.location.assign("/dashboard");
+    return true;
+  } catch (error) {
+    console.warn("Cannot restore server session", error);
+    return false;
+  }
+}
+
 function writeAuthSession(user, csrfToken) {
   try {
     sessionStorage.setItem("truck_cost_dashboard_session", JSON.stringify({
@@ -92,7 +110,7 @@ async function handleCredentialResponse(response) {
     const data = await verifyAuthWithServer(credential);
     writeAuthSession(data.user || {}, data.csrfToken || "");
     window.google?.accounts?.id?.disableAutoSelect();
-    window.location.assign("/");
+    window.location.assign("/dashboard");
   } catch (error) {
     showLoginError(error.message || "Lỗi xác thực từ server. Vui lòng thử lại.");
     window.google?.accounts?.id?.disableAutoSelect();
@@ -144,4 +162,6 @@ function waitForGoogleAuth() {
   }, 6000);
 }
 
-waitForGoogleAuth();
+restoreServerSession().then((restored) => {
+  if (!restored) waitForGoogleAuth();
+});
