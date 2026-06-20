@@ -1,5 +1,12 @@
 const { listDashboardUsers, updateDashboardUser } = require("../_lib/access");
 const { requireAdmin } = require("../_lib/session");
+const {
+  rateLimit,
+  requireCsrf,
+  requireTrustedOrigin,
+  setApiSecurityHeaders,
+  setNoStore,
+} = require("../_lib/security");
 
 function parseBody(body) {
   if (!body) return {};
@@ -12,6 +19,9 @@ function parseBody(body) {
 }
 
 module.exports = async function usersHandler(req, res) {
+  setApiSecurityHeaders(res);
+  setNoStore(res);
+
   const session = requireAdmin(req, res);
   if (!session) return;
 
@@ -21,6 +31,10 @@ module.exports = async function usersHandler(req, res) {
     }
 
     if (req.method === "POST" || req.method === "PATCH") {
+      if (!requireTrustedOrigin(req, res)) return;
+      if (!requireCsrf(req, res, session)) return;
+      if (!rateLimit(req, res, { scope: "admin-users", email: session.email, max: 30, windowMs: 60_000 })) return;
+
       const body = parseBody(req.body);
       if (!body.email) {
         return res.status(400).json({ message: "Thiếu email user." });

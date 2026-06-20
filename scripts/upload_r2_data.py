@@ -55,7 +55,7 @@ def signed_r2_request(cfg, method, object_key, body=b"", content_type=None):
     url = f"https://{host}{canonical_uri}"
 
     headers = {
-        "Cache-Control": "public, max-age=0, must-revalidate",
+        "Cache-Control": "private, max-age=300, must-revalidate",
         "Host": host,
         "X-Amz-Content-Sha256": payload_hash,
         "X-Amz-Date": amz_date,
@@ -157,7 +157,8 @@ def main():
 
     public_base = (cfg.get("R2_PUBLIC_BASE") or "").rstrip("/")
     if public_base:
-        print(f"Manifest URL: {public_base}/{prefix}/manifest.json")
+        print("Warning: R2_PUBLIC_BASE is set, but production data should be served through /api/data only.")
+        print(f"Legacy public manifest URL: {public_base}/{prefix}/manifest.json")
     print(f"Uploaded {len(uploaded)} files.")
     return 0
 

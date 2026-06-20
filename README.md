@@ -8,13 +8,15 @@ Static dashboard cho chi phí thuê xe B2B Truck Last-mile.
 |---|---|
 | Dashboard | https://truck-cost-dashboard.vercel.app |
 | GitHub | https://github.com/nhd712193-star/truck-cost-dashboard |
-| Data host | Cloudflare R2 |
-| Data base | `https://pub-a8611e8e054b4700b1baf208dfd70d3a.r2.dev/prod` |
+| Data host | Cloudflare R2 private bucket |
+| Data access | Vercel `/api/data/*` checks session and redirects to short-lived R2 signed URLs |
 
 ## Access Gate
 
-- Dashboard yêu cầu Google Sign-In bằng email `@ghn.vn` trước khi tải dữ liệu.
+- Dashboard yêu cầu Google Sign-In bằng email `@ghn.vn` trước khi server trả dashboard shell và trước khi tải dữ liệu.
 - Frontend dùng Google Identity Services, serverless function `/api/auth` xác thực ID token với Google.
+- `/api/session` kiểm tra signed HttpOnly cookie. Production không tin `sessionStorage` để mở dashboard.
+- `/api/data/*` kiểm tra quyền `dashboard`, allowlist path dữ liệu, rồi cấp R2 signed URL ngắn hạn.
 - Nếu cấu hình Firebase service account, `/api/auth` sẽ đọc/ghi Firestore để quản lý user, role và audit login.
 - Vercel env:
   - `GOOGLE_CLIENT_ID`
@@ -23,8 +25,11 @@ Static dashboard cho chi phí thuê xe B2B Truck Last-mile.
   - `FIREBASE_SERVICE_ACCOUNT_JSON`
   - `BOOTSTRAP_ADMIN_EMAILS`, ví dụ `admin@ghn.vn,owner@ghn.vn`
   - `AUTO_PROVISION_USERS=false` nếu muốn chặn user chưa có trong Firestore.
+  - `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_PREFIX`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`
+  - `R2_SIGNED_URL_TTL_SECONDS=180`
+  - `APP_ORIGIN=https://truck-cost-dashboard.vercel.app`
 - Trong Google Cloud OAuth, Authorized JavaScript origins phải có production URL của dashboard.
-- Local test không cần OAuth: mở `http://localhost:5173/?devAuth=1`.
+- Local static test không cần OAuth: mở `http://localhost:5173/api/_templates/dashboard.html?devAuth=1`.
 
 Firestore collections:
 
@@ -45,10 +50,18 @@ dashboard_audit_logs/{autoId}
 
 ```text
 truck_cost_dashboard/
-  index.html
+  index.html          # login-only static fallback
   app.js
+  login.js
   styles.css
   vercel.json
+  api/
+    data.js
+    page.js
+    session.js
+    _templates/
+      dashboard.html
+      login.html
   assets/
     vietnam-districts.geojson.gz
     vietnam-provinces.geojson.gz
@@ -75,13 +88,13 @@ cd "/Users/nguyendung/Documents/Mở rộng B2B/truck_cost_dashboard"
 /Users/nguyendung/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 -m http.server 5173
 ```
 
-Mở:
+Mở dashboard static local:
 
 ```text
-http://localhost:5173
+http://localhost:5173/api/_templates/dashboard.html?devAuth=1
 ```
 
-Không nên mở trực tiếp bằng `file://` vì dashboard dùng `fetch` để đọc data.
+Không nên mở trực tiếp bằng `file://` vì dashboard dùng `fetch` để đọc data. Local static mode đọc `./data`; production đọc qua `/api/data`.
 
 ## Prepare Data
 

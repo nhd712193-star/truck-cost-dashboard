@@ -1,6 +1,6 @@
 # Truck Cost Dashboard - Project Overview
 
-Last reviewed: 2026-05-31
+Last reviewed: 2026-06-20
 
 ## Current Status
 
@@ -9,7 +9,7 @@ Last reviewed: 2026-05-31
 | Production app | https://truck-cost-dashboard.vercel.app |
 | GitHub repo | https://github.com/nhd712193-star/truck-cost-dashboard |
 | Git branch | `main` |
-| Cloudflare R2 public data base | `https://pub-a8611e8e054b4700b1baf208dfd70d3a.r2.dev/prod` |
+| Data access | Vercel `/api/data/*` -> private R2 signed URL |
 | R2 bucket | `b2b-truck-cost-dashboard` |
 | R2 prefix | `prod` |
 | Local dashboard root | `/Users/nguyendung/Documents/Mở rộng B2B/truck_cost_dashboard` |
@@ -33,20 +33,33 @@ flowchart LR
   Pipeline --> Drive["Google Drive output / data"]
   Drive --> Prepare["scripts/prepare_static_data.mjs"]
   Prepare --> LocalData["local data/ snapshot"]
-  LocalData --> R2["Cloudflare R2 public data"]
-  GitHub["GitHub code repo"] --> Vercel["Vercel static app"]
+  LocalData --> R2["Cloudflare R2 private bucket"]
+  GitHub["GitHub code repo"] --> Vercel["Vercel app + serverless API"]
+  Vercel --> Auth["/api/auth + /api/session"]
+  Vercel --> DataApi["/api/data allowlist + signed URL"]
+  DataApi --> R2
   R2 --> Dashboard["Dashboard in browser"]
+  Auth --> Dashboard
   Vercel --> Dashboard
 ```
 
 ## Runtime File Layout
 
-Vercel chỉ cần các file frontend và cấu hình:
+Vercel cần frontend, serverless API và private templates:
 
 ```text
-index.html
+index.html          # login-only fallback
 app.js
+login.js
 styles.css
+api/
+  auth.js
+  data.js
+  page.js
+  session.js
+  _templates/
+    dashboard.html
+    login.html
 assets/
 config/
 docs/
@@ -60,7 +73,7 @@ lên R2.
 
 ## Production Data Layout
 
-R2 đang phục vụ data tại:
+R2 lưu data private tại:
 
 ```text
 prod/manifest.json
@@ -71,7 +84,8 @@ prod/rollups/order_index/month=YYYY-MM.csv.gz
 ```
 
 `order_index` được chia theo tháng để dashboard không phải tải một file lớn khi
-mở trang. Dashboard chỉ tải các tháng nằm trong filter ngày hiện tại.
+mở trang. Dashboard gọi `/api/data/...`; API kiểm session/quyền và chỉ ký các
+path nằm trong allowlist.
 
 ## Secrets
 
@@ -84,4 +98,3 @@ Credential Cloudflare R2 nằm local ở:
 File này bị ignore bởi Git và không được commit. Không paste token hoặc secret
 vào chat/log công khai. Nếu credential đã từng bị chia sẻ ngoài máy local, nên
 rotate token trong Cloudflare rồi cập nhật lại `.env.r2`.
-

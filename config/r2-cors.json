@@ -2,10 +2,15 @@
   "rules": [
     {
       "allowed": {
-        "origins": ["*"],
-        "methods": ["GET", "HEAD"]
+        "origins": [
+          "https://truck-cost-dashboard.vercel.app",
+          "http://localhost:5173"
+        ],
+        "methods": ["GET", "HEAD"],
+        "headers": []
       },
-      "maxAgeSeconds": 3600
+      "exposeHeaders": ["Content-Length", "Content-Type", "ETag"],
+      "maxAgeSeconds": 300
     }
   ]
 }

@@ -4,8 +4,8 @@ Mục tiêu dài hạn:
 
 ```text
 GitHub: lưu code dashboard
-Vercel: host static app
-Cloudflare R2: host data public cho dashboard đọc
+Vercel: host login page, dashboard page handler, serverless API
+Cloudflare R2: lưu data private; browser chỉ đọc bằng signed URL ngắn hạn
 Google Drive: lưu backup/staging output nội bộ
 ```
 
@@ -58,9 +58,26 @@ Install Command: empty
 
 Vercel deploy tự động khi push `main` lên GitHub.
 
-`vercel.json` nằm ở project root và đang cấu hình header cho static assets. Theo
-tài liệu Vercel, `vercel.json` là file cấu hình root cho headers, redirects,
-build command và các thiết lập deployment khác.
+`vercel.json` nằm ở project root và cấu hình rewrite `/` qua `/api/page`, rewrite
+`/api/data/*` qua signer, include private HTML templates, và security headers.
+
+Production env bắt buộc:
+
+```text
+GOOGLE_CLIENT_ID
+ALLOWED_DOMAIN=ghn.vn
+SESSION_SECRET
+FIREBASE_SERVICE_ACCOUNT_JSON
+BOOTSTRAP_ADMIN_EMAILS
+AUTO_PROVISION_USERS=false
+R2_ACCOUNT_ID
+R2_BUCKET=b2b-truck-cost-dashboard
+R2_PREFIX=prod
+R2_ACCESS_KEY_ID
+R2_SECRET_ACCESS_KEY
+R2_SIGNED_URL_TTL_SECONDS=180
+APP_ORIGIN=https://truck-cost-dashboard.vercel.app
+```
 
 ## 3. Cloudflare R2
 
@@ -70,24 +87,24 @@ Bucket:
 b2b-truck-cost-dashboard
 ```
 
-Public data base:
+Bucket phải private. Không bật public access cho bucket hoặc prefix production.
+Browser không gọi `pub-*.r2.dev`; browser chỉ nhận signed URL từ `/api/data`.
 
-```text
-https://pub-a8611e8e054b4700b1baf208dfd70d3a.r2.dev/prod
-```
-
-CORS phải cho phép browser từ Vercel đọc object. File cấu hình Wrangler nằm ở:
+CORS chỉ cho phép origin dashboard đọc signed URL. File cấu hình Wrangler nằm ở:
 
 ```text
 config/r2-cors.json
 ```
 
-Cloudflare R2 hỗ trợ cấu hình CORS bằng dashboard hoặc Wrangler. Nếu dùng
-Wrangler:
+Nếu dùng Wrangler:
 
 ```bash
 npx wrangler r2 bucket cors set b2b-truck-cost-dashboard --file config/r2-cors.json
 ```
+
+Sau khi đổi CORS/public access, purge cache Cloudflare nếu trước đó bucket từng
+được public. Rotate R2 access key nếu URL hoặc credential từng bị chia sẻ ngoài
+máy local/Vercel env.
 
 ## 4. Prepare And Upload Data
 
@@ -122,20 +139,20 @@ Hoặc kiểm tra thủ công:
 
 ```bash
 curl -I https://truck-cost-dashboard.vercel.app/
-curl -I https://pub-a8611e8e054b4700b1baf208dfd70d3a.r2.dev/prod/manifest.json
-curl -I -H "Origin: https://truck-cost-dashboard.vercel.app" \
-  https://pub-a8611e8e054b4700b1baf208dfd70d3a.r2.dev/prod/rollups/order_index/month=2026-04.csv.gz
+curl -I https://truck-cost-dashboard.vercel.app/api/data/manifest.json
+SESSION_COOKIE="<truck_cost_session cookie value>" \
+  bash scripts/verify_deployment.sh
 ```
 
 Kết quả tốt:
 
-- Vercel trả `HTTP 200`.
-- R2 `manifest.json` trả `HTTP 200`.
-- R2 object trả `Access-Control-Allow-Origin: *`.
-- `manifest.json` có `order_index_partitions`.
+- `/` trả login page khi chưa đăng nhập hoặc dashboard khi cookie hợp lệ.
+- `/api/data/manifest.json` trả `401` khi chưa đăng nhập.
+- Khi có cookie hợp lệ, `/api/data/...` trả `307` đến `*.r2.cloudflarestorage.com`
+  với `X-Amz-Signature`.
+- `app.js` không chứa public R2 URL hoặc `dataBase`.
 
 ## References
 
 - Cloudflare R2 CORS: https://developers.cloudflare.com/r2/buckets/cors/
 - Vercel `vercel.json`: https://vercel.com/docs/project-configuration/vercel-json
-

@@ -1,6 +1,7 @@
 const DEFAULT_GOOGLE_CLIENT_ID = "788267823901-4p3ls3u8mc5i395odcccamek13tq7qtn.apps.googleusercontent.com";
 const { resolveDashboardUser } = require("./_lib/access");
 const { setSessionCookie } = require("./_lib/session");
+const { rateLimit, requireTrustedOrigin, setApiSecurityHeaders, setNoStore } = require("./_lib/security");
 
 function parseBody(body) {
   if (!body) return {};
@@ -13,10 +14,15 @@ function parseBody(body) {
 }
 
 module.exports = async function authHandler(req, res) {
+  setApiSecurityHeaders(res);
+  setNoStore(res);
+
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
   }
+  if (!requireTrustedOrigin(req, res)) return;
+  if (!rateLimit(req, res, { scope: "auth", max: 20, windowMs: 60_000 })) return;
 
   const googleClientId = process.env.GOOGLE_CLIENT_ID || DEFAULT_GOOGLE_CLIENT_ID;
   const { credential } = parseBody(req.body);
@@ -45,8 +51,17 @@ module.exports = async function authHandler(req, res) {
     }
 
     const user = await resolveDashboardUser(req, token);
-    setSessionCookie(res, user);
-    return res.status(200).json({ user });
+    const session = setSessionCookie(res, user);
+    return res.status(200).json({
+      user: {
+        email: session.email,
+        name: session.name,
+        role: session.role,
+        permissions: session.permissions,
+        exp: session.exp,
+      },
+      csrfToken: session.csrfToken,
+    });
   } catch (error) {
     console.error(error);
     return res

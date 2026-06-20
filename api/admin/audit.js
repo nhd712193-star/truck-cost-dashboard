@@ -1,7 +1,11 @@
 const { listAuditLogs } = require("../_lib/access");
 const { requireAdmin } = require("../_lib/session");
+const { setApiSecurityHeaders, setNoStore } = require("../_lib/security");
 
 module.exports = async function auditHandler(req, res) {
+  setApiSecurityHeaders(res);
+  setNoStore(res);
+
   const session = requireAdmin(req, res);
   if (!session) return;
 

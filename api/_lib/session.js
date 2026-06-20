@@ -53,6 +53,10 @@ function verifyPayload(token) {
   }
 }
 
+function createCsrfToken() {
+  return crypto.randomBytes(32).toString("base64url");
+}
+
 function parseCookies(req) {
   return String(req.headers.cookie || "")
     .split(";")
@@ -67,13 +71,15 @@ function parseCookies(req) {
 }
 
 function setSessionCookie(res, session, maxAgeSeconds = 3600) {
-  const token = signPayload({
+  const payload = {
     email: session.email,
     name: session.name,
     role: session.role,
     permissions: session.permissions,
+    csrfToken: session.csrfToken || createCsrfToken(),
     exp: Math.floor(Date.now() / 1000) + maxAgeSeconds,
-  });
+  };
+  const token = signPayload(payload);
   const secure = process.env.NODE_ENV === "production" || process.env.VERCEL_ENV;
   const parts = [
     `${COOKIE_NAME}=${encodeURIComponent(token)}`,
@@ -84,6 +90,7 @@ function setSessionCookie(res, session, maxAgeSeconds = 3600) {
   ];
   if (secure) parts.push("Secure");
   res.setHeader("Set-Cookie", parts.join("; "));
+  return payload;
 }
 
 function clearSessionCookie(res) {
@@ -107,9 +114,24 @@ function requireAdmin(req, res) {
   return session;
 }
 
+function requireDashboard(req, res) {
+  const session = readSession(req);
+  if (!session) {
+    res.status(401).json({ message: "Phiên đăng nhập không hợp lệ." });
+    return null;
+  }
+  if (!session.permissions?.dashboard) {
+    res.status(403).json({ message: "Tài khoản chưa có quyền xem dashboard." });
+    return null;
+  }
+  return session;
+}
+
 module.exports = {
   clearSessionCookie,
+  createCsrfToken,
   readSession,
   requireAdmin,
+  requireDashboard,
   setSessionCookie,
 };

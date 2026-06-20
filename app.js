@@ -1,8 +1,6 @@
-const REMOTE_DATA_BASE = "https://pub-a8611e8e054b4700b1baf208dfd70d3a.r2.dev/prod";
-const LOCAL_DATA_BASE = "./data";
+const LOCAL_DATA_BASE = "/data";
 const isLocalHost = ["localhost", "127.0.0.1", ""].includes(location.hostname);
-const DATA_BASE = new URLSearchParams(location.search).get("dataBase")
-  || (isLocalHost ? LOCAL_DATA_BASE : REMOTE_DATA_BASE);
+const DATA_BASE = isLocalHost ? LOCAL_DATA_BASE : "/api/data";
 const ORDER_INDEX_DELAY_MS = 1500;
 const AUTH_CONFIG = {
   googleClientId: "788267823901-4p3ls3u8mc5i395odcccamek13tq7qtn.apps.googleusercontent.com",
@@ -188,6 +186,7 @@ function saveAuthPayload(payload, userInfo = {}) {
     role: userInfo.role || "user",
     user_group: userInfo.user_group || "truck-cost-dashboard",
     permissions: userInfo.permissions || { dashboard: true },
+    csrfToken: userInfo.csrfToken || "",
   };
   writeAuthSession(session);
   return session;
@@ -221,6 +220,7 @@ function startDevAuthIfRequested() {
     role: "developer",
     user_group: "local",
     permissions: { dashboard: true },
+    csrfToken: "local-dev-csrf",
   };
   writeAuthSession(session);
   startDashboardAfterAuth(session);
@@ -245,7 +245,29 @@ async function verifyAuthWithServer(credential) {
   if (!apiResponse.ok) {
     throw new Error(data.message || data.error || "Lỗi xác thực từ server.");
   }
-  return data.user || {};
+  return {
+    ...(data.user || {}),
+    csrfToken: data.csrfToken || data.user?.csrfToken || "",
+  };
+}
+
+async function fetchServerSession() {
+  if (isLocalHost) return null;
+  try {
+    const response = await fetch("/api/session", {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return null;
+    return {
+      ...(data.user || {}),
+      csrfToken: data.csrfToken || "",
+    };
+  } catch (error) {
+    console.warn("Cannot restore server session", error);
+    return null;
+  }
 }
 
 async function handleCredentialResponse(response) {
@@ -321,8 +343,34 @@ function waitForGoogleAuth() {
   }, 6000);
 }
 
-function initAuthGate() {
+async function initAuthGate() {
   if (startDevAuthIfRequested()) return;
+
+  if (!isLocalHost) {
+    const serverSession = await fetchServerSession();
+    if (serverSession?.email) {
+      const restoredSession = {
+        email: serverSession.email,
+        name: serverSession.name || serverSession.email,
+        picture: "",
+        sub: "",
+        exp: serverSession.exp || 0,
+        savedAt: Date.now(),
+        role: serverSession.role || "viewer",
+        user_group: "truck-cost-dashboard",
+        permissions: serverSession.permissions || { dashboard: true },
+        csrfToken: serverSession.csrfToken || "",
+      };
+      writeAuthSession(restoredSession);
+      startDashboardAfterAuth(restoredSession);
+      return;
+    }
+
+    clearAuthSession();
+    showLoginGate();
+    waitForGoogleAuth();
+    return;
+  }
 
   const session = readAuthSession();
   if (isAuthSessionValid(session)) {
@@ -1481,7 +1529,7 @@ function findDistrictRow(data, selectedDistrict) {
 async function ensureDistrictMap() {
   if (state.districtMap?.features?.length) return state.districtMap;
   if (!state.districtMapPromise) {
-    state.districtMapPromise = fetchTextMaybeGzip("./assets/vietnam-districts.geojson.gz")
+    state.districtMapPromise = fetchTextMaybeGzip("/assets/vietnam-districts.geojson.gz")
       .then((text) => JSON.parse(text))
       .then((data) => {
         state.districtMap = data;
@@ -2071,12 +2119,19 @@ function keyLabel(key) {
 }
 
 async function fetchJson(url, options = {}) {
+  const method = String(options.method || "GET").toUpperCase();
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {}),
+  };
+  if (!["GET", "HEAD", "OPTIONS"].includes(method) && state.authSession?.csrfToken) {
+    headers["X-CSRF-Token"] = state.authSession.csrfToken;
+  }
+
   const response = await fetch(url, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
+    credentials: "same-origin",
+    headers,
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -2319,7 +2374,7 @@ async function loadData() {
   state.wardError = null;
   state.orderIndexLoading = Boolean(state.orderIndexPartitions.length || state.orderIndexFallbackRollup);
   state.orderIndexError = null;
-  state.map = JSON.parse(await fetchTextMaybeGzip("./assets/vietnam-provinces.geojson.gz"));
+  state.map = JSON.parse(await fetchTextMaybeGzip("/assets/vietnam-provinces.geojson.gz"));
 
   const dates = state.data.daily.map((r) => r.cost_date).sort();
   const defaultRange = defaultCompleteMonthRange(state.data.daily, 3);
@@ -2475,7 +2530,12 @@ el("signOutButton").addEventListener("click", async () => {
   clearAuthSession();
   state.authSession = null;
   try {
-    await fetch("/api/logout", { method: "POST", keepalive: true });
+    await fetch("/api/logout", {
+      method: "POST",
+      keepalive: true,
+      credentials: "same-origin",
+      headers: state.authSession?.csrfToken ? { "X-CSRF-Token": state.authSession.csrfToken } : {},
+    });
   } catch (error) {
     console.warn("Cannot clear server session", error);
   }
